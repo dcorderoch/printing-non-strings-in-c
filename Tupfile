@@ -1,0 +1,83 @@
+.gitignore
+
+EXE := non_strings
+
+CC := ccache @(CC)
+
+COMMON_CFLAGS += -isystem include
+COMMON_CFLAGS += -Wall
+COMMON_CFLAGS += -Wextra
+COMMON_CFLAGS += -Wconversion
+COMMON_CFLAGS += -Wdouble-promotion
+COMMON_CFLAGS += -Werror
+COMMON_CFLAGS += -Wmissing-declarations
+COMMON_CFLAGS += -Wno-unused-function
+COMMON_CFLAGS += -Wno-unused-parameter
+COMMON_CFLAGS += -Wno-sign-conversion
+COMMON_CFLAGS += -pedantic
+COMMON_CFLAGS += -g3
+
+ifeq (@(DEBUG),n)
+COMMON_CFLAGS += -DNDEBUG
+COMMON_CFLAGS += -O2
+endif
+
+ifeq (@(DEBUG),y)
+COMMON_CFLAGS += -Og
+endif
+
+CFLAGS := $(COMMON_CFLAGS)
+CFLAGS += -std=c90
+
+PLATFORM_CFLAGS := $(COMMON_CFLAGS)
+PLATFORM_CFLAGS += -std=c99
+# NOTE: important for MAP_ANONYMOUS
+PLATFORM_CFLAGS += -D_GNU_SOURCE
+PLATFORM_CFLAGS += -D_POSIX_C_SOURCE=200809L
+
+# go before LDFLAGS, if used
+ASANFLAGS += -fsanitize=address
+ifeq (@(CC),gcc)
+ASANFLAGS += -fsanitize-undefined-trap-on-error
+endif
+ifeq (@(CC),clang)
+ASANFLAGS += -fsanitize-trap=undefined
+endif
+ASANFLAGS += -fno-common
+ASANFLAGS += -fno-omit-frame-pointer
+
+# TODO: enable?
+# ASAN/UBSAN environment variabls
+# ASAN_OPTIONS=abort_on_error=1:halt_on_error=1
+# UBSAN_OPTIONS=abort_on_error=1:halt_on_error=1
+
+ifeq (@(ASAN),y)
+LDFLAGS := $(ASANFLAGS)
+endif
+
+LDFLAGS += -Wl,-fuse=mold
+LDFLAGS += -g3
+ifeq (@(DEBUG),n)
+# strip debug symbols
+LDFLAGS += -s
+endif
+
+SRC :=
+
+PLATFORM_SRC := posix_main.c
+
+# ASAN and valgrind don't mix well, so ONLY use valgrind if ASAN is disabled
+ifeq (@(ASAN),n)
+ifeq (@(DEBUG),y)
+CMD_PREFIX := valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes -v --vgdb=yes
+endif
+endif
+
+: foreach $(SRC) $(PLATFORM_SRC) |> cpp -o %o %f |> %B.ppc
+
+: foreach $(SRC) |> $(CC) $(CFLAGS) -c -o %o %f |> %B.o {obs}
+
+: foreach $(PLATFORM_SRC) |> $(CC) $(PLATFORM_CFLAGS) -c -o %o %f |> %B.o {pobs}
+: {pobs} {obs} |> $(CC) -o %o %f $(LDFLAGS) |> bin/$(EXE) {exe}
+
+: {exe} |> $(CMD_PREFIX) ./%f |>
